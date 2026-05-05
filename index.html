@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UrbiMap v3.9.2 - Delete Enabled</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root { --panel-width: 380px; --bg: #0f0f0f; --card: #1a1a1a; --accent: #3498db; --danger: #e74c3c; --text: #e0e0e0; --border: #333; }
+        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        
+        #sidebar { width: var(--panel-width); height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; padding: 25px; box-sizing: border-box; border-right: 1px solid var(--border); }
+        #sidebar::-webkit-scrollbar { width: 5px; }
+        #sidebar::-webkit-scrollbar-thumb { background: #444; border-radius: 10px; }
+        #map { flex-grow: 1; }
+
+        .block { background: var(--card); padding: 18px; border-radius: 12px; border: 1px solid var(--border); }
+        h3 { margin: 0 0 12px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #666; font-weight: 800; }
+        
+        input, select, textarea, button { width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 8px; border: 1px solid var(--border); background: #222; color: white; box-sizing: border-box; font-size: 14px; }
+        
+        textarea { 
+            resize: vertical; 
+            min-height: 80px; 
+            max-height: 400px;
+        }
+
+        button { background: var(--accent); border: none; cursor: pointer; font-weight: bold; transition: 0.3s; color: white; }
+        button:hover { filter: brightness(1.2); }
+        
+        .folder-root { margin-bottom: 10px; border: 1px solid #333; border-radius: 8px; overflow: hidden; }
+        .folder-header { background: #262626; padding: 10px; display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 13px; }
+        .cat-item { padding: 8px 15px 8px 30px; display: flex; align-items: center; gap: 10px; background: #1a1a1a; border-top: 1px solid #222; font-size: 12px; }
+        
+        .edit-ico { cursor: pointer; opacity: 0.5; transition: 0.2s; margin-left: 5px; }
+        .edit-ico:hover { opacity: 1; color: var(--accent); }
+        .del-ico:hover { color: var(--danger); }
+
+        .filter-chip { display: flex; align-items: center; gap: 8px; background: #222; padding: 6px 10px; border-radius: 6px; border: 1px solid #333; cursor: pointer; font-size: 11px; margin-bottom: 4px; }
+        .filter-chip input { width: auto; margin: 0; }
+        
+        .date-row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+        .date-range { display: flex; align-items: center; background: #222; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 10px; }
+        .date-range input { border: none; margin: 0; background: transparent; padding: 8px; }
+
+        .marker-dot { border: 2px solid white; border-radius: 50%; box-shadow: 0 0 5px rgba(0,0,0,0.8); }
+        .popup-content { min-width: 180px; color: #333; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2 style="margin:0; color: var(--accent);">UrbiMap <span style="font-size: 12px; color: #444;">v3.9.2</span></h2>
+
+        <input type="text" id="global-search" placeholder="🔍 Поиск..." oninput="render()">
+
+        <div class="block">
+            <h3 id="form-title">Метка</h3>
+            <input type="hidden" id="in-lat"><input type="hidden" id="in-lng"><input type="hidden" id="edit-index" value="-1">
+            <input type="text" id="in-title" placeholder="Название">
+            <textarea id="in-desc" placeholder="Описание..."></textarea>
+            
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                <select id="select-folder" onchange="syncCatSelect()"></select>
+                <select id="select-cat"></select>
+            </div>
+            
+            <div class="date-row">
+                <input type="date" id="in-date" style="margin:0;">
+                <label style="font-size: 9px; white-space: nowrap; cursor: pointer; color:#777;">
+                    <input type="checkbox" id="in-date-flex" style="width:auto;" onchange="toggleDateMode(this)"> Не помню число
+                </label>
+            </div>
+
+            <button onclick="savePoint()" id="save-btn">Сохранить</button>
+            <button id="cancel-btn" style="display:none; background:#333;" onclick="resetForm()">Отмена</button>
+        </div>
+
+        <div class="block">
+            <h3>Временной диапазон</h3>
+            <div class="date-range">
+                <input type="date" id="f-date-start" onchange="render()">
+                <span>—</span>
+                <input type="date" id="f-date-end" onchange="render()">
+            </div>
+            <h3>Категории и папки</h3>
+            <div id="filter-tree"></div>
+        </div>
+
+        <div class="block">
+            <h3>Структура базы</h3>
+            <div style="display:flex; gap:5px; margin-bottom:10px;">
+                <input type="text" id="new-folder-name" placeholder="Новая папка" style="margin:0;">
+                <button style="width:45px;" onclick="addFolder()">+</button>
+            </div>
+            <div id="manage-tree"></div>
+        </div>
+
+        <div class="block" style="border-style: dashed; opacity: 0.6;">
+            <button onclick="exportData()" style="background:#333; font-size:11px;">Экспорт JSON</button>
+            <button onclick="document.getElementById('import-file').click()" style="background:#333; font-size:11px; margin-top:5px;">Импорт JSON</button>
+            <input type="file" id="import-file" style="display:none" onchange="importData(event)">
+            <button onclick="clearData()" style="color:var(--danger); background:none; font-size:10px; border:none; margin-top:5px;">Сброс</button>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        let storage = JSON.parse(localStorage.getItem('urbimap_v39_data')) || {
+            points: [],
+            folders: [],
+            activeCats: []
+        };
+
+        const map = L.map('map', { attributionControl: false }).setView([54.3141, 48.4031], 13);
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}').addTo(map);
+        let markersLayer = L.layerGroup().addTo(map);
+
+        function updateUI() {
+            const fSel = document.getElementById('select-folder');
+            const mTree = document.getElementById('manage-tree');
+            const fTree = document.getElementById('filter-tree');
+            const lastFolder = fSel.value;
+            
+            fSel.innerHTML = ''; mTree.innerHTML = ''; fTree.innerHTML = '';
+
+            storage.folders.forEach((f, fIdx) => {
+                fSel.innerHTML += `<option value="${f.name}">${f.name}</option>`;
+                
+                let catsHtml = f.categories.map((c, cIdx) => `
+                    <div class="cat-item">
+                        <span style="color:${c.color}">●</span> ${c.name}
+                        <input type="color" value="${c.color}" style="width:18px; height:18px; padding:0; border:none; background:none; margin-left:auto; cursor:pointer;" 
+                            onchange="updateCatColor(${fIdx}, ${cIdx}, this.value)">
+                        <span class="edit-ico" onclick="renameCategory(${fIdx}, ${cIdx})">✎</span>
+                        <span class="edit-ico del-ico" onclick="deleteCat(${fIdx}, ${cIdx})">×</span>
+                    </div>`).join('');
+
+                mTree.innerHTML += `
+                    <div class="folder-root">
+                        <div class="folder-header">
+                            📁 ${f.name}
+                            <div style="margin-left:auto;">
+                                <span class="edit-ico" onclick="renameFolder(${fIdx})">✎</span>
+                                <span class="edit-ico del-ico" onclick="deleteFolder(${fIdx})">×</span>
+                            </div>
+                        </div>
+                        ${catsHtml}
+                        <div style="display:flex; gap:2px; padding:5px; background:#222;">
+                            <input type="text" id="add-cat-to-${fIdx}" placeholder="+ категория" style="margin:0; font-size:11px; padding:5px;">
+                            <button style="width:30px; margin:0; padding:5px;" onclick="addCategory(${fIdx})">+</button>
+                        </div>
+                    </div>`;
+
+                let filterCatsHtml = f.categories.map(c => {
+                    const id = `${f.name}|${c.name}`;
+                    const checked = storage.activeCats.includes(id) ? 'checked' : '';
+                    return `<label class="filter-chip"><input type="checkbox" ${checked} onchange="toggleFilter('${id}')"> ${c.name}</label>`;
+                }).join('');
+
+                fTree.innerHTML += `
+                    <div style="margin-bottom:10px;">
+                        <div style="font-size:11px; color:#555; font-weight:800; margin-bottom:5px;">📁 ${f.name.toUpperCase()}</div>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px;">${filterCatsHtml}</div>
+                    </div>`;
+            });
+            fSel.value = lastFolder || (storage.folders[0] ? storage.folders[0].name : "");
+            syncCatSelect();
+        }
+
+        function syncCatSelect() {
+            const fName = document.getElementById('select-folder').value;
+            const cSel = document.getElementById('select-cat');
+            cSel.innerHTML = '';
+            const folder = storage.folders.find(f => f.name === fName);
+            if (folder) folder.categories.forEach(c => cSel.innerHTML += `<option value="${c.name}">${c.name}</option>`);
+        }
+
+        function renameFolder(idx) {
+            const oldName = storage.folders[idx].name;
+            const newName = prompt("Новое название папки:", oldName);
+            if (!newName || newName === oldName) return;
+            storage.points.forEach(p => { if (p.folder === oldName) p.folder = newName; });
+            storage.folders[idx].name = newName;
+            save(); updateUI(); render();
+        }
+
+        function renameCategory(fIdx, cIdx) {
+            const folder = storage.folders[fIdx];
+            const oldName = folder.categories[cIdx].name;
+            const newName = prompt("Новое название категории:", oldName);
+            if (!newName || newName === oldName) return;
+            storage.points.forEach(p => { if (p.folder === folder.name && p.catName === oldName) p.catName = newName; });
+            folder.categories[cIdx].name = newName;
+            save(); updateUI(); render();
+        }
+
+        function toggleDateMode(cb) { document.getElementById('in-date').type = cb.checked ? 'month' : 'date'; }
+        function toggleFilter(id) {
+            if (storage.activeCats.includes(id)) storage.activeCats = storage.activeCats.filter(i => i !== id);
+            else storage.activeCats.push(id);
+            save(); render();
+        }
+        function addFolder() {
+            const val = document.getElementById('new-folder-name').value.trim();
+            if (val) { storage.folders.push({name: val, categories: []}); save(); updateUI(); document.getElementById('new-folder-name').value = ''; }
+        }
+        function deleteFolder(idx) { if(confirm("Удалить папку?")) { storage.folders.splice(idx, 1); save(); updateUI(); render(); } }
+        function addCategory(fIdx) {
+            const name = document.getElementById(`add-cat-to-${fIdx}`).value.trim();
+            if (name) { storage.folders[fIdx].categories.push({name, color: '#3498db'}); save(); updateUI(); }
+        }
+        function deleteCat(fIdx, cIdx) { storage.folders[fIdx].categories.splice(cIdx, 1); save(); updateUI(); render(); }
+        function updateCatColor(fIdx, cIdx, color) { storage.folders[fIdx].categories[cIdx].color = color; save(); render(); }
+
+        map.on('click', e => {
+            document.getElementById('in-lat').value = e.latlng.lat;
+            document.getElementById('in-lng').value = e.latlng.lng;
+            document.getElementById('form-title').innerText = "Метка " + e.latlng.lat.toFixed(3);
+        });
+
+        function savePoint() {
+            const idx = parseInt(document.getElementById('edit-index').value);
+            const pData = {
+                lat: parseFloat(document.getElementById('in-lat').value),
+                lng: parseFloat(document.getElementById('in-lng').value),
+                title: document.getElementById('in-title').value.trim(),
+                desc: document.getElementById('in-desc').value.trim(),
+                folder: document.getElementById('select-folder').value,
+                catName: document.getElementById('select-cat').value,
+                date: document.getElementById('in-date').value
+            };
+            if (!pData.lat || !pData.title || !pData.catName) return alert("Выбери место!");
+            if (idx === -1) storage.points.push(pData); else storage.points[idx] = pData;
+            save(); resetForm(); render();
+        }
+
+        // НОВАЯ ФУНКЦИЯ УДАЛЕНИЯ ТОЧКИ
+        function deletePoint(index) {
+            if (confirm("Удалить эту метку навсегда?")) {
+                storage.points.splice(index, 1);
+                save();
+                render();
+            }
+        }
+
+        function render() {
+            markersLayer.clearLayers();
+            const query = document.getElementById('global-search').value.toLowerCase();
+            const dStart = document.getElementById('f-date-start').value;
+            const dEnd = document.getElementById('f-date-end').value;
+
+            storage.points.forEach((p, i) => {
+                const catId = `${p.folder}|${p.catName}`;
+                if (storage.activeCats.length > 0 && !storage.activeCats.includes(catId)) return;
+                if (query && !p.title.toLowerCase().includes(query) && !p.desc.toLowerCase().includes(query)) return;
+                if (dStart && p.date < dStart) return;
+                if (dEnd && p.date > dEnd) return;
+
+                const folder = storage.folders.find(f => f.name === p.folder);
+                const cat = folder ? folder.categories.find(c => c.name === p.catName) : null;
+                const color = cat ? cat.color : '#fff';
+
+                const icon = L.divIcon({
+                    className: 'marker-dot',
+                    html: `<div style="background-color: ${color}; width: 14px; height: 14px; border-radius: 50%;"></div>`,
+                    iconSize: [14, 14]
+                });
+
+                L.marker([p.lat, p.lng], {icon}).bindPopup(`
+                    <div class="popup-content">
+                        <b>${p.title}</b><p style="font-size:12px; margin:5px 0;">${p.desc}</p>
+                        <small style="color:#888">${p.date} • ${p.folder}</small>
+                        <hr style="border:0; border-top:1px solid #eee; margin:10px 0;">
+                        <div style="display:flex; justify-content: space-between;">
+                            <a onclick="editPoint(${i})" style="color:var(--accent); cursor:pointer; font-size:11px; font-weight:bold;">ПРАВКА</a>
+                            <a onclick="deletePoint(${i})" style="color:var(--danger); cursor:pointer; font-size:11px; font-weight:bold;">УДАЛИТЬ</a>
+                        </div>
+                    </div>`).addTo(markersLayer);
+            });
+            updateUI();
+        }
+
+        function editPoint(i) {
+            const p = storage.points[i];
+            document.getElementById('edit-index').value = i;
+            document.getElementById('in-lat').value = p.lat;
+            document.getElementById('in-lng').value = p.lng;
+            document.getElementById('in-title').value = p.title;
+            document.getElementById('in-desc').value = p.desc;
+            document.getElementById('select-folder').value = p.folder;
+            syncCatSelect();
+            document.getElementById('select-cat').value = p.catName;
+            document.getElementById('in-date').value = p.date;
+            document.getElementById('cancel-btn').style.display = "block";
+            document.getElementById('form-title').innerText = "Правка объекта";
+            map.closePopup();
+        }
+
+        function resetForm() {
+            document.getElementById('edit-index').value = "-1";
+            document.getElementById('in-title').value = ""; document.getElementById('in-desc').value = "";
+            document.getElementById('cancel-btn').style.display = "none";
+            document.getElementById('form-title').innerText = "Метка";
+        }
+
+        function save() { localStorage.setItem('urbimap_v39_data', JSON.stringify(storage)); }
+        function exportData() {
+            const blob = new Blob([JSON.stringify(storage)], {type: "application/json"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = "urbimap.json"; a.click();
+        }
+        function importData(e) {
+            const reader = new FileReader();
+            reader.onload = (ev) => { storage = JSON.parse(ev.target.result); save(); location.reload(); };
+            reader.readAsText(e.target.files[0]);
+        }
+        function clearData() { if(confirm("Стереть всё?")) { localStorage.clear(); location.reload(); } }
+
+        updateUI(); render();
+    </script>
+</body>
+</html>
